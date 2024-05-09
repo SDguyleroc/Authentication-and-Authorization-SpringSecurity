@@ -201,6 +201,115 @@ Extending the JpaRepository we'll have access to a lot of methods to manipulate 
 
 We need to define a secrete key to sign our tokens, this key will be used to validate and to generate the token signature. we'll be using the @Value annotation to get the secrete key from the application.yml file. And in the application.yml file we'll define the secrete key as an enviroment variable, this will help us keep the secrete key safe and out of the source code.
 
+```
+//.env
+JWT_SECRET="yoursecret"
+```
+
+In our application.yml:
+
+```yml
+// resources/application.yml
+security:
+  jwt:
+    token:
+      secret-key: ${JWT_SECRET}
+```
+
+To the spring-boot application read the environment variables we need declare the PropertySource annotation in our main class indicating where is the .env file located. In our case it's located in the root of the project, so we'll use the user.dir variable to get the project root path. The main class will look like this:
+```java
+@SpringBootApplication
+@PropertySource("file:${user.dir}/.env")
+public class SpringAuthApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(SpringAuthApplication.class, args);
+    }
+}
+```
+
+finally we can define our token provider class, this class will be responsible to generate and validate our tokens.
+```java
+// config/auth/TokenProvider.java
+@Service
+public class TokenProvider {
+  @Value("${security.jwt.token.secret-key}")
+  private String JWT_SECRET;
+
+  public String generateAccessToken(User user) {
+    try {
+      Algorithm algorithm = Algorithm.HMAC256(JWT_SECRET);
+      return JWT.create()
+          .withSubject(user.getUsername())
+          .withClaim("username", user.getUsername())
+          .withExpiresAt(genAccessExpirationDate())
+          .sign(algorithm);
+    } catch (JWTCreationException exception) {
+      throw new JWTCreationException("Error while generating token", exception);
+    }
+  }
+
+  public String validateToken(String token) {
+    try {
+      Algorithm algorithm = Algorithm.HMAC256(JWT_SECRET);
+      return JWT.require(algorithm)
+          .build()
+          .verify(token)
+          .getSubject();
+    } catch (JWTVerificationException exception) {
+      throw new JWTVerificationException("Error while validating token", exception);
+    }
+  }
+
+  private Instant genAccessExpirationDate() {
+    return LocalDateTime.now().plusHours(2).toInstant(ZoneOffset.of("-03:00"));
+  }
+}
+```
+
+In the generateAccessToken we define an algorithm to sign our token, the subject of the token and the expiration date and return a new token. In the validateToken method we validate the token signature and return the subject of the token.
+
+## Securoty filter
+
+```java
+// config/auth/SecurityFilter.java
+@Component
+public class SecurityFilter extends OncePerRequestFilter {
+  @Autowired
+  TokenProvider tokenService;
+  @Autowired
+  UserRepository userRepository;
+
+  @Override
+  protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+      throws ServletException, IOException {
+    var token = this.recoverToken(request);
+    if (token != null) {
+      var login = tokenService.validateToken(token);
+      var user = userRepository.findByLogin(login);
+      var authentication = new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities());
+      SecurityContextHolder.getContext().setAuthentication(authentication);
+    }
+    filterChain.doFilter(request, response);
+  }
+
+  private String recoverToken(HttpServletRequest request) {
+    var authHeader = request.getHeader("Authorization");
+    if (authHeader == null)
+      return null;
+    return authHeader.replace("Bearer ", "");
+  }
+}
+```
+
+In the doFilterInternal method we recover the token from the request, remove the "Bearer" from the string using the recoverToken helper method, validate the token and set the authentication in the SecurityContextHolder. The SecurityContextHolder is a spring security class that holds the authentication of the current request, so we can access the user information in the controllers.
+
+
+
+
+
+
+
+
 
 
 
