@@ -125,7 +125,7 @@ public enum UserRole {
 
 The user entity will be the core of our authentication system, it will hold the user's credentials and the roles that user has. We'll be implementing the userDetails interface to represent our user entity, which is provided by the spring security package and it;s the recommended way to represent the user entity in a spring-boot application.
 
-```
+```java
   // entities/UserEntity.java
 @Table()
 @Entity(name = "users")
