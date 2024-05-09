@@ -305,8 +305,180 @@ In the doFilterInternal method we recover the token from the request, remove the
 
 
 
+## Auth configuration
+
+Here we need to define some more necessary methods to make our authentication system work. At the top we have the configuration and @EnableWebSecurity annotation to enable the web security in our application. Then we define the SecurityFilterChain bean to define the endpoints that will be protected by our authentication system.
+
+```java
+// config/AuthConfig.java
+@Configuration
+@EnableWebSecurity
+public class AuthConfig {
+  @Autowired
+  SecurityFilter securityFilter;
+
+  @Bean
+  SecurityFilterChain securityFilterChain(HttpSecurity httpSecurity) throws Exception {
+    return httpSecurity
+        .csrf(csrf -> csrf.disable())
+        .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+        .authorizeHttpRequests(authorize -> authorize
+            .requestMatchers(HttpMethod.POST, "/api/v1/auth/*").permitAll()
+            .requestMatchers(HttpMethod.POST, "/api/v1/books").hasRole("ADMIN")
+            .anyRequest().authenticated())
+        .addFilterBefore(securityFilter, UsernamePasswordAuthenticationFilter.class)
+        .build();
+  }
+
+  @Bean
+  AuthenticationManager authenticationManager(AuthenticationConfiguration authenticationConfiguration)
+      throws Exception {
+    return authenticationConfiguration.getAuthenticationManager();
+  }
+
+  @Bean
+  PasswordEncoder passwordEncoder() {
+    return new BCryptPasswordEncoder();
+  }
+}
+
+```
+
+In the authorizeHttpRequests method we define the endpoints that will be protected and the roles that will have access to each endpoint. In our case the /api/v1/auth/* endpoints will be public, the /api/v1/books endpoint will be protected and only the users with the ADMIN role will have access to it. The others endpoints will be protected and only the authenticated users will have access to it.
+
+In the addFilterBefore method we define the filter that we created before. And finally we define the AuthenticationManager and the PasswordEncoder beans that is necessary to make the authentication system work.
+
+In the addFilterBefore method we define the filter that we created before. And finally we define the AuthenticationManager and the PasswordEncoder beans that is necessary to make the authentication system work.
+
+#Auth DTOs
+
+We'll need two DTO's to receive the user credentials, and another DTO to return the token when user sign in.
+```java
+// dtos/SignUpDto.java
+public record SignUpDto(
+    String login,
+    String password,
+    UserRole role) {
+}
+```
+```java
+
+// dtos/SignInDto.java
+public record SignInDto(
+    String login,
+    String password) {
+}
+```
+```java
+
+// dtos/JwtDto.java
+public record JwtDto(
+    String accessToken) {
+}
+```
+### Auth service
+
+here we define the service implementing UserdetailsService that will be responsible to create the the users and save them in the database or load the user information by the username.
+
+```java
+// services/AuthService.java
+@Service
+public class AuthService implements UserDetailsService {
+
+  @Autowired
+  UserRepository repository;
+
+  @Override
+  public UserDetails loadUserByUsername(String username) {
+    var user = repository.findByLogin(username);
+    return user;
+  }
+
+  public UserDetails signUp(SignUpDto data) throws InvalidJwtException {
+    if (repository.findByLogin(data.login()) != null) {
+      throw new InvalidJwtException("Username already exists");
+    }
+    String encryptedPassword = new BCryptPasswordEncoder().encode(data.password());
+    User newUser = new User(data.login(), encryptedPassword, data.role());
+    return repository.save(newUser);
+  }
+}
 
 
+```
+In the signUp method we check if the username is already registered then encrypt the password using the BCryptPassowrdEncorder and save the user information.
+
+
+Auth controller
+
+And finally we define the auth controller. It will be responsible to receive the request, authenticate the users and generate the tokens.
+
+```java
+// controllers/AuthController.java
+@RestController
+@RequestMapping("/api/v1/auth")
+public class AuthController {
+  @Autowired
+  private AuthenticationManager authenticationManager;
+  @Autowired
+  private AuthService service;
+  @Autowired
+  private TokenProvider tokenService;
+
+  @PostMapping("/signup")
+  public ResponseEntity<?> signUp(@RequestBody @Valid SignUpDto data) {
+    service.signUp(data);
+    return ResponseEntity.status(HttpStatus.CREATED).build();
+  }
+
+  @PostMapping("/signin")
+  public ResponseEntity<JwtDto> signIn(@RequestBody @Valid SignInDto data) {
+    var usernamePassword = new UsernamePasswordAuthenticationToken(data.login(), data.password());
+    var authUser = authenticationManager.authenticate(usernamePassword);
+    var accessToken = tokenService.generateAccessToken((User) authUser.getPrincipal());
+    return ResponseEntity.ok(new JwtDto(accessToken));
+  }
+}
+
+```
+
+In the signUp method we receive the user data, create a new user and save it in the database. In the signIn method we receive the user credentials, authenticate the user using the AuthenticationManager, and generate the token.
+
+
+
+
+Testing the authentication
+
+To create a new user we send a POST request to the /api/v1/auth/signup endpoint with a body containing the login, password and one of the roles available (USER or ADMIN):
+```
+{
+  "login": "myusername",
+  "password": "123456",
+  "role": "USER"
+}
+```
+
+To retrieve an authentication token we send a POST request with this user login and password to the /api/v1/auth/signin endpoint.
+
+To test our authentication system we'll create a simple book controller with two endpoints, one to create a new book and another one to list all the books.
+```java
+@RestController
+@RequestMapping("/api/v1/books")
+public class BookController {
+
+  @GetMapping
+  public ResponseEntity<List<String>> findAll() {
+    return ResponseEntity.ok(List.of("Book1", "Book2", "Book3"));
+  }
+
+  @PostMapping
+  public ResponseEntity<String> create(@RequestBody String data) {
+    return ResponseEntity.ok(data);
+  }
+}
+```
+
+In the /api/v1/books endpoint the GET method will be available for the users with USER role, and the POST method will be protected and only the users with the ADMIN role will be able to create a book.
 
 
 
