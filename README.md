@@ -189,7 +189,8 @@ public class User implements UserDetails {
 
 It has a lot of methods that we can override from userDetails to customize the authentication proccess, you can implement those properties in the database too but for now we'll only use the required to make our authentication system work: id, username, passoword, and role.
 for the user repository we have the following code:
-```
+```java
+
 // repositories/UserRepository.java
 public interface UserRepository extends JpaRepository<User, Long> {
   UserDetails findByLogin(String login);
